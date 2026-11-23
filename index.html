@@ -231,6 +231,21 @@ body.selecting,body.selecting *{-webkit-user-select:none!important;user-select:n
 .tools .save .mini{display:block;width:100%;margin-top:7px;background:var(--sky);color:var(--ink);border:0;border-radius:8px;padding:7px 8px;font-size:12.5px;font-weight:600;line-height:1.3}
 .tools .save .mini.ghost{background:none;border:1px solid #3a5154;color:#a9b8ba;font-weight:400}
 .tools .save .warn{color:var(--terra-l)}
+.tools .save{margin-top:0;margin-bottom:4px}
+.tools .save b{color:#fff;font-weight:600;overflow-wrap:anywhere}
+.tools .save .mini.go{background:var(--terra);color:#fff}
+.printmenu{margin-top:8px;background:var(--ink2);border:1px solid #3a5154;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:5px}
+.printmenu[hidden]{display:none}
+#bkrow[hidden]{display:none}
+#browserwarn{max-width:1180px;margin:0 auto 18px;background:#fbe9e2;border:1px solid var(--terra-l);border-left:5px solid var(--terra);border-radius:12px;padding:14px 44px 14px 18px;position:relative;font-size:14.5px}
+#browserwarn b{color:var(--terra)}
+#browserwarn p{margin:4px 0 0}
+#browserwarn .x{position:absolute;top:8px;right:10px;background:none;border:0;font-size:20px;color:var(--muted);line-height:1;padding:4px}
+.printmenu span{font-size:12px;color:#a9b8ba;padding:0 2px 2px}
+.printmenu button{background:none;border:1px solid #3a5154;color:#fff;border-radius:8px;padding:7px 9px;font-size:13px;text-align:left}
+.printmenu button:hover{background:var(--terra);border-color:var(--terra)}
+#fscard .btn{margin:4px 8px 0 0}
+#fscard .btn.ghost{background:none;color:var(--ink);border:1px solid var(--ink)}
 .wt .in,.ft .in,.mt .in,.vt .in{scroll-margin-top:80px}
 
 @media (max-width:980px){
@@ -249,7 +264,7 @@ body.selecting,body.selecting *{-webkit-user-select:none!important;user-select:n
   .list b{flex-basis:110px}
 }
 @media print{
-  #side,#gate,#tip,#fxbar,#sumbar,.add,.del,.cta,.steps button{display:none!important}
+  #side,#gate,#tip,#fxbar,#sumbar,#browserwarn,.add,.del,.cta,.steps button{display:none!important}
   main{padding:0}
   body{background:#fff;font-size:11px}
   .scroll{overflow:visible;border:0}
@@ -261,6 +276,7 @@ body.selecting,body.selecting *{-webkit-user-select:none!important;user-select:n
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 </style>
+<style id="pgsize">@page{size:A4 portrait;margin:10mm}</style>
 </head>
 <body>
 
@@ -292,11 +308,16 @@ body.selecting,body.selecting *{-webkit-user-select:none!important;user-select:n
       <button data-go="maandanalyse" data-tab="maandanalyse"><i>04</i>Maandanalyse</button>
     </nav>
     <div class="tools">
-      <button class="dl" data-act="download" id="dlbtn">⬇ Download als HTML</button>
-      <button class="dl2" data-act="xlsx" title="Download alles als Excel-bestand met een tabblad per onderdeel">⬇ Exporteer naar Excel</button>
-      <div class="row"><button data-act="export" title="Sla al je ingevulde gegevens op als bestand">⭳ Exporteer gegevens</button><button data-act="import" title="Zet eerder geëxporteerde gegevens terug">⭱ Importeer gegevens</button></div>
-      <div class="row"><button data-act="print">Afdrukken</button><button data-act="wipe">Alles wissen</button></div>
       <div class="save" id="savestate"></div>
+      <div class="row" id="bkrow" hidden><button data-act="export" title="Sla al je ingevulde gegevens op als bestand">⭳ Exporteer gegevens</button><button data-act="import" title="Zet eerder geëxporteerde gegevens terug">⭱ Importeer gegevens</button></div>
+      <div class="row"><button data-act="printmenu" aria-expanded="false" aria-controls="printmenu">Afdrukken ▾</button><button data-act="wipe">Alles wissen</button></div>
+      <div class="printmenu" id="printmenu" hidden>
+        <span>Welke pagina wil je afdrukken?</span>
+        <button data-print="doelen">01 Doelen</button>
+        <button data-print="uurtarief">02 Uurtarief</button>
+        <button data-print="jaarplan">03 Jaarplan</button>
+        <button data-print="maandanalyse">04 Maandanalyse</button>
+      </div>
     </div>
   </aside>
   <main id="view"></main>
@@ -449,6 +470,7 @@ function flush(){
   if(saveTimer===null) return;
   clearTimeout(saveTimer); saveTimer = null;
   try { localStorage.setItem(SKEY, JSON.stringify(st)); canStore = true; } catch(e){ canStore = false; }
+  fsWrite();
   saveMsg(true);
 }
 function save(){ st.t = Date.now(); clearTimeout(saveTimer); saveTimer = setTimeout(flush, 250); }
@@ -456,13 +478,148 @@ function save(){ st.t = Date.now(); clearTimeout(saveTimer); saveTimer = setTime
 window.addEventListener('pagehide', flush);
 window.addEventListener('beforeunload', flush);
 document.addEventListener('visibilitychange', function(){ if(document.hidden) flush(); });
+/* ---------- opslagbestand op de eigen computer (Chrome/Edge: File System Access) ----------
+   De cursist kiest één keer een .json-bestand. Daarna wordt na elke wijziging automatisch daarin
+   opgeslagen, en bij het openen van de tool wordt het bestand weer ingeladen (het nieuwste wint).
+   Browsers die dit niet kunnen (Safari, Firefox) houden de knoppen Exporteer/Importeer gegevens. */
+var FS_OK = typeof window.showSaveFilePicker==="function" && typeof window.showOpenFilePicker==="function" && window.isSecureContext!==false && typeof indexedDB!=="undefined";
+try { if(window.self!==window.top) FS_OK = false; } catch(e){ FS_OK = false; }
+var fh = null, fsState = "none", fsLast = "", fsChain = Promise.resolve(), fsPending = false;
+var FS_TYPES = [{description:"Jaarplan-gegevens", accept:{"application/json":[".json"]}}];
+function idbDo(mode, fn){
+  return new Promise(function(res, rej){
+    var r = indexedDB.open("jaarplan2027", 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore("kv"); };
+    r.onerror = function(){ rej(r.error); };
+    r.onsuccess = function(){ var db = r.result, tx = db.transaction("kv", mode), q = fn(tx.objectStore("kv"));
+      tx.oncomplete = function(){ db.close(); res(q && q.result); }; tx.onerror = function(){ db.close(); rej(tx.error); }; };
+  });
+}
+function fsRemember(h){ return idbDo("readwrite", function(o){ return o.put(h, "file:"+SKEY); }).catch(function(){}); }
+function fsRecall(){ return idbDo("readonly", function(o){ return o.get("file:"+SKEY); }); }
+function nowHM(){ return new Date().toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}); }
+function fileText(){ return JSON.stringify({ app:"jaarplan2027", versie:1, opgeslagen:new Date().toISOString(), state:st }, null, 1); }
+function hasData(){ var d = defaults(), k;
+  for(k in st.v) if(st.v[k]!==d.v[k]) return true;
+  for(k in st.rows) if(st.rows[k] && st.rows[k].length) return true;
+  return false; }
+function applyState(s){
+  st = s; if(!st.rows) st.rows = {}; if(!st.f) st.f = {};
+  eng = createEngine(FORMULAS, st); layDirty();
+  try { localStorage.setItem(SKEY, JSON.stringify(st)); } catch(e){}
+  go(route.join("/"), true);
+}
+/* Schrijf de huidige gegevens naar het opslagbestand (nooit twee keer tegelijk). */
+function fsWrite(){
+  if(!fh || fsState!=="ok") return;
+  if(fsPending) return; fsPending = true;
+  fsChain = fsChain.then(function(){
+    fsPending = false; var text = fileText();
+    return fh.createWritable().then(function(w){ return w.write(text).then(function(){ return w.close(); }); });
+  }).then(function(){ fsLast = nowHM(); saveMsg(false); }, function(e){
+    fsPending = false; fsState = (e && (e.name==="NotAllowedError" || e.name==="SecurityError")) ? "ask" : "error"; saveMsg(false);
+  });
+}
+function readFsFile(h){
+  return h.getFile().then(function(f){ return f.text(); }).then(function(text){
+    var raw = null; try { raw = JSON.parse(text); } catch(e){}
+    if(!String(text).trim()) return {empty:true};
+    if(!raw || raw.app!=="jaarplan2027") return {bad:true};
+    var s = readImport(text); if(!s) return {bad:true};
+    s.t = (raw.state && raw.state.t) || 0; return {state:s};
+  });
+}
+/* Gekoppeld bestand inladen: het nieuwste (browser of bestand) wint; daarna staat alles gelijk. */
+function fsLoad(){
+  return readFsFile(fh).then(function(r){
+    if(r.bad){ fsState = "error"; saveMsg(false); return; }
+    fsState = "ok";
+    if(r.state && (r.state.t||0) > (st.t||0)){ applyState(r.state); fsLast = nowHM(); saveMsg(false); }
+    else fsWrite();
+  }).catch(function(e){ fsState = (e && e.name==="NotAllowedError") ? "ask" : "error"; saveMsg(false); });
+}
+function fsInit(){
+  if(!FS_OK) return;
+  fsRecall().then(function(h){
+    if(!h || !h.queryPermission) return;
+    fh = h;
+    return h.queryPermission({mode:"readwrite"}).then(function(p){
+      if(p==="granted") return fsLoad();
+      fsState = "ask"; saveMsg(false);
+    });
+  }).catch(function(){});
+}
+function fsAllow(){
+  if(!fh) return;
+  fh.requestPermission({mode:"readwrite"}).then(function(p){
+    if(p==="granted") fsLoad(); else { fsState = "ask"; saveMsg(false); }
+  }).catch(function(){ fsState = "error"; saveMsg(false); });
+}
+function fsNew(){
+  window.showSaveFilePicker({ suggestedName:"Jaarplan-2027-gegevens.json", types:FS_TYPES }).then(function(h){
+    fh = h; fsState = "ok"; if(!st.t) st.t = Date.now();
+    fsRemember(h); fsWrite(); saveMsg(false);
+  }).catch(function(e){ if(!(e && e.name==="AbortError")) alert("Het opslagbestand kon niet worden aangemaakt. Probeer het opnieuw of kies een andere map."); });
+}
+function fsOpen(){
+  var picked = null;
+  window.showOpenFilePicker({ types:FS_TYPES, multiple:false }).then(function(a){
+    picked = a[0];
+    return picked.requestPermission({mode:"readwrite"}).then(function(p){
+      if(p!=="granted") throw {name:"Denied"};
+      return readFsFile(picked);
+    });
+  }).then(function(r){
+    if(r.bad) return alert("Dit is geen opslagbestand van het Jaarplan. Kies het .json-bestand dat de tool eerder voor je heeft gemaakt.");
+    if(r.state && hasData() && !confirm("Gegevens uit ‘"+picked.name+"’ laden? Wat nu in deze browser is ingevuld, wordt vervangen door de gegevens uit dit bestand.")) return;
+    fh = picked; fsState = "ok"; fsRemember(picked);
+    if(r.state){ if(!r.state.t) r.state.t = Date.now(); applyState(r.state); fsLast = nowHM(); saveMsg(false); }
+    else fsWrite();
+  }).catch(function(e){
+    if(e && e.name==="AbortError") return;
+    if(e && e.name==="Denied") return alert("Zonder toestemming kan de tool niet in dit bestand opslaan. Probeer het opnieuw en kies ‘Wijzigingen opslaan’ of ‘Toestaan’.");
+    alert("Het bestand kon niet worden geopend.");
+  });
+}
+var IS_FILE = location.protocol==="file:";
+function warnHidden(){ try { return sessionStorage.getItem("jaarplan2027:browserwarn")==="1"; } catch(e){ return false; } }
+function browserWarnHtml(){
+  if(FS_OK || warnHidden()) return "";
+  return '<div id="browserwarn" role="note"><button class="x" data-act="hidewarn" title="Melding sluiten" aria-label="Melding sluiten">×</button>'
+    + '<b>Let op: deze browser kan je gegevens niet automatisch in een bestand bewaren.</b>'
+    + '<p>Open de tool op je computer in <b>Google Chrome</b> of <b>Microsoft Edge</b>, dan wordt alles automatisch opgeslagen en weer ingeladen.'
+    + (IS_FILE ? ' Op een Mac: klik met de rechtermuisknop (of Ctrl + klik) op het Jaarplan-bestand → <b>Openen met</b> → <b>Google Chrome</b>.' : '')
+    + '</p><p>Blijf je liever in deze browser? Klik dan na elke werksessie links op <b>Exporteer gegevens</b> en bewaar het bestand op een vaste plek. Met <b>Importeer gegevens</b> zet je het terug.</p></div>';
+}
+function fsCardHtml(){
+  var nm = fh ? '<b>'+esc(fh.name)+'</b>' : "";
+  if(!FS_OK) return '<div><h3>Bewaar je gegevens veilig</h3><p class="muted" style="margin:0">Alles wat je invult wordt automatisch bewaard in deze browser. Maar wis je je browsergegevens, of werk je op een andere computer, dan zie je het niet meer. Klik daarom na elke werksessie links op <b>Exporteer gegevens</b> en bewaar het bestand op een vaste plek. Met <b>Importeer gegevens</b> zet je het terug. Tip: werk je in <b>Chrome</b> of <b>Edge</b>, dan kan de tool automatisch in een bestand op je computer opslaan.</p></div>';
+  if(fsState==="ok") return '<div><h3>✓ Je gegevens worden automatisch opgeslagen</h3><p class="muted" style="margin:0">Alles wat je invult gaat na elke wijziging automatisch naar '+nm+' op je computer. Open je de tool later opnieuw, dan wordt dit bestand vanzelf weer ingeladen. Laat het bestand op dezelfde plek staan. Werk je op een andere computer? Neem het bestand mee (bijvoorbeeld via OneDrive, Google Drive of een USB-stick) en kies links <b>Bestaand opslagbestand openen</b>.</p></div>';
+  if(fsState==="ask") return '<div><h3>Je gegevens laden</h3><p class="muted" style="margin:0">Je opslagbestand '+nm+' is gekoppeld. Je browser vraagt nog één keer om toestemming om het te openen en erin op te slaan.</p></div><button class="btn" data-act="fsallow">Gegevens laden</button>';
+  return '<div><h3>Stap 1: kies je opslagbestand</h3><p class="muted" style="margin:0">'
+    + (fsState==="error" ? 'Opslaan in '+nm+' lukt niet meer. Misschien is het bestand verplaatst, hernoemd of verwijderd. ' : '')
+    + 'Kies één keer een opslagbestand op je computer, '+(IS_FILE ? 'het handigst in <b>dezelfde map als dit Jaarplan-bestand</b>' : 'bijvoorbeeld in <b>Documenten</b>')+'. Daarna wordt alles wat je invult automatisch in dat bestand bewaard en bij het openen van de tool vanzelf weer ingeladen. Zo raak je nooit iets kwijt. <b>Eerste keer?</b> Kies <b>Nieuw opslagbestand maken</b>. <b>Al eerder gewerkt</b> (of op een andere computer)? Kies <b>Bestaand opslagbestand openen</b>.</p></div>'
+    + '<div><button class="btn" data-act="fsnew">Nieuw opslagbestand maken</button><button class="btn ghost" data-act="fsopen">Bestaand opslagbestand openen</button></div>';
+}
 function saveMsg(just){
-  var el = document.getElementById("savestate"), parts = [];
-  if(just) lastSaved = new Date().toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"});
-  if(canStore) parts.push(lastSaved ? "✓ Automatisch opgeslagen om "+lastSaved+"." : "✓ Alles wat je invult wordt automatisch opgeslagen.");
-  else parts.push('<span class="warn">Let op: deze browser kan zelf niets bewaren. Sla tussendoor een kopie op.</span>');
-  el.className = "save";
-  el.innerHTML = parts.join("<br>");
+  var el = document.getElementById("savestate"), h = "";
+  if(just) lastSaved = nowHM();
+  var nm = fh ? '<b>'+esc(fh.name)+'</b>' : "";
+  if(FS_OK){
+    if(fsState==="ok") h = (fsLast ? "✓ Automatisch opgeslagen in "+nm+" om "+fsLast+"." : "✓ Gekoppeld aan "+nm+". Alles wordt automatisch opgeslagen.")
+      + '<button class="mini ghost" data-act="fsopen">Ander opslagbestand openen</button>';
+    else if(fsState==="ask") h = '<span class="warn">Je opslagbestand '+nm+' is gekoppeld. Klik om je gegevens te laden.</span><button class="mini go" data-act="fsallow">Gegevens laden</button>';
+    else h = '<span class="warn">'+(fsState==="error" ? 'Opslaan in '+nm+' lukt niet. Is het bestand verplaatst of verwijderd?' : 'Kies een opslagbestand, dan wordt alles automatisch op je computer bewaard.')+'</span>'
+      + '<button class="mini go" data-act="fsnew">Nieuw opslagbestand maken</button><button class="mini ghost" data-act="fsopen">Bestaand opslagbestand openen</button>';
+    if(!canStore && fsState!=="ok") h += '<br><span class="warn">Let op: deze browser kan zelf niets bewaren.</span>';
+  } else {
+    h = canStore ? (lastSaved ? "✓ Automatisch opgeslagen in deze browser om "+lastSaved+"." : "✓ Alles wat je invult wordt automatisch opgeslagen in deze browser.")
+      : '<span class="warn">Let op: deze browser kan zelf niets bewaren.</span>';
+    h += '<br><span class="warn">Maak na elke werksessie een back-up met Exporteer gegevens.</span>';
+  }
+  el.className = "save"; el.innerHTML = h;
+  var bk = document.getElementById("bkrow"); if(bk) bk.hidden = FS_OK;
+  var c = document.getElementById("fscard"); if(c) c.innerHTML = fsCardHtml();
 }
 
 /* ---------- getallen ---------- */
@@ -510,9 +667,7 @@ function pageStart(sub){
       + '<p class="quote">Een winstgevende onderneming begint niet bij meer omzet, maar bij weten wat je wilt bereiken.</p>'
       + '<p>Succes en vooral ook plezier bij het maken van jouw Jaarplan!</p><p>Met winstgevende groet,<br><b>Bertha Baas</b></p>'
       + '<p><button class="btn" data-go="start/inhoud">Verder: wat vind je hier? →</button></p></div>';
-    h += LOCAL
-      ? '<div class="card cta"><div><h3>Je werkt nu in je eigen, lokale versie</h3><p class="muted" style="margin:0">Dit bestand staat op je eigen computer. Alles wat je invult wordt automatisch bewaard: sluit je de laptop af en open je het bestand morgen opnieuw (in dezelfde browser), dan staat alles er nog. Wil je een reservekopie of je plan meenemen naar een andere computer? Sla dan een kopie op, inclusief alles wat je hebt ingevuld.</p></div><button class="btn" data-act="download">⬇ Kopie opslaan</button></div>'
-      : '<div class="card cta"><div><h3>Dit is de online tool</h3><p class="muted" style="margin:0">Je kunt het Jaarplan hier online invullen, of downloaden als HTML-bestand. Het bestand komt in je map Downloads; dubbelklik erop en het opent in je browser, lokaal op je eigen laptop. Wat je al hebt ingevuld gaat mee, en ook lokaal wordt alles automatisch bewaard.</p></div><button class="btn" data-act="download">⬇ Klik hier om te downloaden</button></div>';
+    h += '<div class="card cta" id="fscard">'+fsCardHtml()+'</div>';
   }
   if(sub==="inhoud"){
     h += hero("Wat vind je hier?","Uitleg en legenda")
@@ -527,7 +682,7 @@ function pageStart(sub){
       + '<li><span class="sw" style="background:var(--beige)"></span><span><b>Beige</b><br>Automatische berekeningen en subtotale bedragen</span></li>'
       + '<li><span class="sw" style="background:var(--terra)"></span><span><b>Terracotta</b><br>Aandachtspunten, afwijkingen en acties</span></li>'
       + '<li><span class="sw" style="background:var(--ink)"></span><span><b>Donkerblauw</b><br>Kopteksten en belangrijke uitkomsten</span></li></ul></div></div>'
-      + '<div class="card"><h3>Goed om te weten</h3><p class="muted" style="margin:0">Wat je invult wordt automatisch bewaard in de browser op dit apparaat. Met het plusje (<b>+ Regel toevoegen</b>) voeg je overal extra regels toe; de totalen rekenen vanzelf mee. Met de downloadknop links sla je de tool, inclusief jouw gegevens, op als bestand. Met <b>Exporteer gegevens</b> bewaar je alleen je ingevulde gegevens als reservekopie; met <b>Importeer gegevens</b> zet je ze weer terug, bijvoorbeeld nadat je browsergegevens zijn gewist of op een andere computer.</p></div>'
+      + '<div class="card"><h3>Goed om te weten</h3><p class="muted" style="margin:0">Alles wat je invult wordt automatisch bewaard. Heb je (in Chrome of Edge) een <b>opslagbestand</b> gekozen, dan gaat alles na elke wijziging ook automatisch naar dat bestand op je eigen computer, en bij het openen van de tool wordt het weer ingeladen. Zo raak je niets kwijt, ook niet als je browsergegevens worden gewist. Werk je op een andere computer, kies dan links <b>Bestaand opslagbestand openen</b>. Met het plusje (<b>+ Regel toevoegen</b>) voeg je overal extra regels toe; de totalen rekenen vanzelf mee. Met <b>Afdrukken</b> kies je welke pagina je wilt afdrukken.</p></div>'
       + '<div class="card"><h3>Rekenen zoals in Excel</h3><ul class="rules">'
       + '<li><b>Formules:</b> typ in een lichtblauw vakje een formule die begint met =, bijvoorbeeld <b>=2x5</b> of <b>=1200/12</b>, en druk op Enter. In het vakje verschijnt de uitkomst; zodra je weer op het vakje staat, zie je de formule. Een vakje met een formule herken je aan het rode hoekje.</li>'
       + '<li><b>Verwijzen naar andere vakjes:</b> typ = en klik daarna op een ander vakje (of sleep over een reeks). Bijvoorbeeld bij Directe kosten: =, klik op het aantal bij Uitgangspunten, typ *, klik op de prijs en druk op Enter. Je kunt ook SOM, GEMIDDELDE, MIN, MAX, AFRONDEN en ALS gebruiken, zoals =SOM(D44:D49).</li>'
@@ -536,7 +691,7 @@ function pageStart(sub){
       + '<li><b>Kopiëren en plakken:</b> selecteer een vakje of een reeks, druk op <b>Ctrl+C</b>, ga naar het doel en druk op <b>Ctrl+V</b>. Formules schuiven mee zoals in Excel (D5 wordt E5 als je één vakje naar rechts plakt); wat met $ is vastgezet blijft staan. Selecteer je eerst meerdere vakjes, dan wordt het gekopieerde in alle vakjes geplakt. Met <b>Ctrl+R</b> voer je het eerste vakje door naar rechts, met <b>Ctrl+D</b> naar beneden. Selecteren kan met de muis of met <b>Shift + pijltjes</b>. (Mac: Cmd in plaats van Ctrl.)</li>'
       + '<li><b>Formulebalk:</b> boven de tabellen zie je het celadres (zoals D33) en de formule van het vakje waar je op staat, ook van de beige rekenvakjes.</li>'
       + '<li><b>Optellen:</b> sleep met de muis over een reeks vakjes. Rechtsonder verschijnen de som, het gemiddelde en het aantal. Met Shift+klik vergroot je de selectie, met Ctrl+klik (Mac: Cmd+klik) voeg je losse vakjes toe.</li>'
-      + '<li><b>Excel:</b> met <b>Exporteer naar Excel</b> download je een Excel-bestand met een tabblad voor Doelen, Uurtarief, Jaarplan en Maandanalyse, inclusief werkende formules.</li></ul></div>';
+      + '</ul></div>';
   }
   if(sub==="stappen"){
     var S = [["Bepaal je doelen","Wat wil je bereiken in 2027? Hoeveel wil je verdienen en hoeveel wil je werken?","doelen","Naar Doelen"],
@@ -1235,149 +1390,6 @@ function buildHtml(id){
   return SOURCE.slice(0, a+open.length) + payload + SOURCE.slice(b);
 }
 
-/* ---------- export naar Excel (.xlsx met tabbladen) ---------- */
-var XFILL = {blue:"CFD7DA", beige:"F2EEE8", ink:"162729", terra:"A75839", sub:"F7F4EF", hdr:"E4DDD2"};
-var XNUM = {eur0:164, eur2:165, int:3, dec:0, dec1:166, pct:9};
-function XS(){ this.fonts = ['<font><sz val="11"/><name val="Calibri"/></font>']; this.fills = ['<fill><patternFill patternType="none"/></fill>','<fill><patternFill patternType="gray125"/></fill>']; this.xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>']; this.map = {}; this.fm = {}; this.fl = {}; }
-XS.prototype.id = function(o){
-  var key = JSON.stringify(o); if(key in this.map) return this.map[key];
-  var font = '<font>'+(o.b?'<b/>':'')+(o.i?'<i/>':'')+'<sz val="'+(o.sz||11)+'"/>'+(o.color?'<color rgb="FF'+o.color+'"/>':'')+'<name val="Calibri"/></font>';
-  var fi = this.fm[font]; if(fi===undefined){ fi = this.fonts.length; this.fonts.push(font); this.fm[font] = fi; }
-  var fl = 0; if(o.fill){ fl = this.fl[o.fill]; if(fl===undefined){ fl = this.fills.length; this.fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FF'+o.fill+'"/><bgColor indexed="64"/></patternFill></fill>'); this.fl[o.fill] = fl; } }
-  var nf = XNUM[o.fmt] || 0, al = o.wrap || o.al;
-  this.xfs.push('<xf numFmtId="'+nf+'" fontId="'+fi+'" fillId="'+fl+'" borderId="0" xfId="0"'+(nf?' applyNumberFormat="1"':'')+(fi?' applyFont="1"':'')+(fl?' applyFill="1"':'')
-    +(al ? ' applyAlignment="1"><alignment'+(o.al?' horizontal="'+o.al+'"':'')+(o.wrap?' wrapText="1" vertical="top"':'')+'/></xf>' : '/>'));
-  return this.map[key] = this.xfs.length-1;
-};
-XS.prototype.xml = function(){
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-    + '<numFmts count="3"><numFmt numFmtId="164" formatCode="&quot;€&quot; #,##0;-&quot;€&quot; #,##0"/><numFmt numFmtId="165" formatCode="&quot;€&quot; #,##0.00;-&quot;€&quot; #,##0.00"/><numFmt numFmtId="166" formatCode="#,##0.0"/></numFmts>'
-    + '<fonts count="'+this.fonts.length+'">'+this.fonts.join("")+'</fonts><fills count="'+this.fills.length+'">'+this.fills.join("")+'</fills>'
-    + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    + '<cellXfs count="'+this.xfs.length+'">'+this.xfs.join("")+'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
-};
-function xe(s){ return String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function xStyle(cell, S){
-  var t = cell.st || "", o = {};
-  if(t==="title"){ o.b = 1; o.sz = 16; }
-  else if(t==="hint"){ o.i = 1; o.color = "5D6B6D"; }
-  else if(t==="sec" || t==="bar" || t==="dark"){ o.b = 1; o.fill = XFILL.ink; o.color = "FFFFFF"; }
-  else if(t==="res"){ o.b = 1; o.fill = XFILL.terra; o.color = "FFFFFF"; }
-  else if(t==="tot"){ o.b = 1; o.fill = XFILL.beige; }
-  else if(t==="sub"){ o.b = 1; o.fill = XFILL.sub; }
-  else if(t==="hdr"){ o.b = 1; o.fill = XFILL.hdr; }
-  else if(t==="grp"){ o.b = 1; }
-  if(cell.kind==="in" || cell.kind==="txt" || cell.kind==="sel") o.fill = XFILL.blue;
-  else if(cell.kind==="calc" && !o.fill) o.fill = XFILL.beige;
-  if(cell.f) o.fmt = cell.f;
-  if(cell.wrap) o.wrap = 1;
-  if(t==="sec" && cell.c>2 && cell.kind==="lbl") o.al = "right";
-  return S.id(o);
-}
-function xCell(cell, S){
-  var k = cell.k, o = {r:cell.r, c:cell.c, a:cell.a, s:xStyle(cell, S)}, v;
-  switch(cell.kind){
-    case "lbl": o.t = "s"; o.v = cell.v; break;
-    case "mir": v = st.v[cell.src]; o.t = "s"; o.v = (typeof v==="string" && v.trim()) ? v : cell.def; break;
-    case "txt": v = st.v[k]; o.t = "s"; o.v = typeof v==="string" ? v : (cell.def!=null ? cell.def : (LABELS[k] || "")); break;
-    case "sel": o.t = "s"; o.v = st.v[k] || "Jan"; break;
-    default:
-      if(st.f && st.f[k]){
-        if(st.f[k].indexOf("#ERR:")===0){ o.t = "s"; o.v = "="+st.f[k].slice(5)+"  (formule klopt niet)"; }
-        else { o.t = "f"; o.f = fromStore(st.f[k], cell.s, true); o.v = eng.get(k); }
-      }
-      else if(cell.kind==="in" && typeof st.v[k]==="number"){ o.t = "n"; o.v = st.v[k]; }
-      else { var bx = builtinX(k); if(bx){ o.t = "f"; o.f = bx; o.v = eng.get(k); } else o.t = "e"; }
-  }
-  return o;
-}
-function cx(c){
-  var a = ' r="'+c.a+'"'+(c.s ? ' s="'+c.s+'"' : '');
-  if(c.t==="s") return (c.v==null || c.v==="") ? '<c'+a+'/>' : '<c'+a+' t="inlineStr"><is><t xml:space="preserve">'+xe(c.v)+'</t></is></c>';
-  if(c.t==="n") return '<c'+a+'><v>'+c.v+'</v></c>';
-  if(c.t==="f") return '<c'+a+'><f>'+xe(c.f)+'</f>'+(typeof c.v==="number" && isFinite(c.v) ? '<v>'+c.v+'</v>' : '')+'</c>';
-  return '<c'+a+'/>';
-}
-function sheetXml(cells, o){
-  var rows = {}, rn;
-  cells.forEach(function(c){ (rows[c.r] = rows[c.r] || []).push(c); });
-  rn = Object.keys(rows).map(Number).sort(function(a,b){ return a-b; });
-  var data = rn.map(function(r){ return '<row r="'+r+'">'+rows[r].sort(function(a,b){ return a.c-b.c; }).map(cx).join("")+'</row>'; }).join("");
-  var pane = o.pane ? '<pane xSplit="'+o.pane+'" topLeftCell="'+colStr(o.pane+1)+'1" activePane="topRight" state="frozen"/><selection pane="topRight"/>' : '';
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-    + '<sheetViews><sheetView workbookViewId="0" showGridLines="0"'+(o.selected?' tabSelected="1"':'')+'>'+pane+'</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
-    + '<cols>'+o.cols.map(function(c){ return '<col min="'+c[0]+'" max="'+c[1]+'" width="'+c[2]+'" customWidth="1"/>'; }).join("")+'</cols>'
-    + '<sheetData>'+data+'</sheetData>'
-    + (o.merge && o.merge.length ? '<mergeCells count="'+o.merge.length+'">'+o.merge.map(function(m){ return '<mergeCell ref="'+m+'"/>'; }).join("")+'</mergeCells>' : '')
-    + '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToHeight="0"/></worksheet>';
-}
-function doelenCells(S){
-  var out = [], r = 1;
-  function put(v, st, wrap){ var cell = {kind:st==="in"?"txt":"lbl", st:st==="in"?"":st, wrap:wrap, c:1, r:r, a:"A"+r}; out.push({r:r, c:1, a:"A"+r, t:"s", v:v, s:xStyle(cell, S)}); r++; }
-  function txt(k){ var v = st.v[k]; return typeof v==="string" ? v : ""; }
-  function list(g, base){ var items = base.map(function(x){ return txt("D!A"+x); }).concat(rowsOf(g).map(function(id){ return txt("D!A#"+id); })); items.forEach(function(t,i){ put((i+1)+". "+t, "in", 1); }); }
-  put("Doelen 2027","title"); r++;
-  put("Missie","sec"); put(txt("D!A10"),"in",1); r++;
-  put("Visie (lange en korte termijn)","sec"); put(txt("D!A15"),"in",1); r++;
-  put("Unique Selling Points (USP's)","sec"); list("usp",[22,23,24]); r++;
-  put("Financiële doelen 2027","sec"); list("doel",[29,30,31]);
-  return out;
-}
-var CRCT = (function(){ var t = [], c, n, k; for(n=0;n<256;n++){ c = n; for(k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1; t[n] = c>>>0; } return t; })();
-function crc32(b){ var c = 0xFFFFFFFF; for(var i=0;i<b.length;i++) c = CRCT[(c^b[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
-function zipBlob(files, type){
-  var enc = new TextEncoder(), parts = [], central = [], off = 0, d = new Date();
-  var dt = ((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate(), tm = (d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
-  files.forEach(function(f){
-    var nm = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
-    var h = new DataView(new ArrayBuffer(30));
-    h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0x0800,true); h.setUint16(8,0,true); h.setUint16(10,tm,true); h.setUint16(12,dt,true);
-    h.setUint32(14,crc,true); h.setUint32(18,data.length,true); h.setUint32(22,data.length,true); h.setUint16(26,nm.length,true); h.setUint16(28,0,true);
-    parts.push(new Uint8Array(h.buffer), nm, data);
-    var c = new DataView(new ArrayBuffer(46));
-    c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true); c.setUint16(10,0,true); c.setUint16(12,tm,true); c.setUint16(14,dt,true);
-    c.setUint32(16,crc,true); c.setUint32(20,data.length,true); c.setUint32(24,data.length,true); c.setUint16(28,nm.length,true); c.setUint32(42,off,true);
-    central.push(new Uint8Array(c.buffer), nm);
-    off += 30+nm.length+data.length;
-  });
-  var csz = 0; central.forEach(function(x){ csz += x.length; });
-  var e = new DataView(new ArrayBuffer(22));
-  e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,csz,true); e.setUint32(16,off,true);
-  return new Blob(parts.concat(central, [new Uint8Array(e.buffer)]), {type:type});
-}
-function buildXlsx(){
-  flush(); eng.reset();
-  var Ls = LAY(), S = new XS(), MC = [];
-  function cells(L){ return L.list.map(function(c){ return xCell(c, S); }); }
-  var sheets = [
-    {name:"Doelen", xml: sheetXml(doelenCells(S), {cols:[[1,1,110]]})},
-    {name:"Uurtarief", xml: sheetXml(cells(Ls.U), {cols:[[1,1,2],[2,2,36],[3,3,14],[4,4,58],[5,5,30],[6,6,14]]})},
-    {name:"Jaarplan", xml: sheetXml(cells(Ls.J), {cols:[[1,1,2],[2,2,34],[3,3,11],[4,15,11],[16,16,13]], pane:3, selected:true})},
-    {name:"Maandanalyse", xml: sheetXml(cells(Ls.M), {cols:[[1,1,2],[2,2,30],[3,16,13]], merge:Ls.M.merge})}
-  ];
-  var files = [
-    {name:"[Content_Types].xml", data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-      + sheets.map(function(s,i){ return '<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join("")
-      + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'},
-    {name:"_rels/.rels", data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
-    {name:"xl/workbook.xml", data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="2"/></bookViews><sheets>'
-      + sheets.map(function(s,i){ return '<sheet name="'+s.name+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>'; }).join("")
-      + '</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'},
-    {name:"xl/_rels/workbook.xml.rels", data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-      + sheets.map(function(s,i){ return '<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>'; }).join("")
-      + '<Relationship Id="rId'+(sheets.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'}
-  ];
-  sheets.forEach(function(s,i){ files.push({name:"xl/worksheets/sheet"+(i+1)+".xml", data:s.xml}); });
-  files.push({name:"xl/styles.xml", data:S.xml()});
-  return files;
-}
-function exportXlsx(){
-  var d = new Date(), p = function(n){ return (n<10?"0":"")+n; };
-  var type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  saveFile("Jaarplan-2027-Bertha-Baas-"+d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+".xlsx", zipBlob(buildXlsx(), type), type);
-}
-
-
 /* ---------- weergave ---------- */
 var view = document.getElementById("view"), route = ["start","welkom"];
 function recalc(){
@@ -1412,7 +1424,7 @@ function recalc(){
 }
 function render(){
   var p = route[0]; eng.reset(); sel = {anchor:null, ranges:[]}; painted = []; hl = [];
-  view.innerHTML = p==="doelen" ? pageDoelen() : p==="uurtarief" ? pageUurtarief() : p==="jaarplan" ? pageJaarplan() : p==="maandanalyse" ? pageMaand() : pageStart(route[1]||"welkom");
+  view.innerHTML = browserWarnHtml() + (p==="doelen" ? pageDoelen() : p==="uurtarief" ? pageUurtarief() : p==="jaarplan" ? pageJaarplan() : p==="maandanalyse" ? pageMaand() : pageStart(route[1]||"welkom"));
   var b = document.querySelectorAll("#nav button"), i;
   for(i=0;i<b.length;i++){
     var go = b[i].getAttribute("data-go"), tab = b[i].getAttribute("data-tab");
@@ -1420,6 +1432,7 @@ function render(){
   }
   document.querySelector('[data-sub="start"]').classList.toggle("open", p==="start");
   buildIndex(); recalc(); growAll();
+  if(typeof setPageSize==="function") setPageSize(p);
 }
 function go(r, keepScroll){
   var parts = String(r||"").replace(/^#/,"").split("/");
@@ -1710,7 +1723,7 @@ document.addEventListener("keydown", function(e){
   }
 });
 document.addEventListener("click", function(e){
-  var t = e.target.closest ? e.target.closest("[data-go],[data-act],[data-add],[data-del],[data-dellast]") : null; if(!t) return;
+  var t = e.target.closest ? e.target.closest("[data-go],[data-act],[data-add],[data-del],[data-dellast],[data-print]") : null; if(!t) return;
   var g;
   if(t.hasAttribute("data-go")) return go(t.getAttribute("data-go"));
   if((g = t.getAttribute("data-add"))){
@@ -1721,19 +1734,46 @@ document.addEventListener("click", function(e){
   }
   if((g = t.getAttribute("data-del"))) return removeRow(g, t.getAttribute("data-id"));
   if((g = t.getAttribute("data-dellast"))){ var ids = rowsOf(g); if(ids.length) removeRow(g, ids[ids.length-1]); return; }
+  if((g = t.getAttribute("data-print"))) return printPage(g);
   var a = t.getAttribute("data-act");
-  if(a==="print") window.print();
-  if(a==="wipe" && confirm("Weet je zeker dat je alles wilt wissen? Alle ingevulde gegevens in deze browser worden verwijderd. Dit kan niet ongedaan worden gemaakt.")){
+  if(a==="printmenu") return togglePrintMenu();
+  if(a==="fsnew") fsNew();
+  if(a==="fsopen") fsOpen();
+  if(a==="fsallow") fsAllow();
+  if(a==="hidewarn"){ try { sessionStorage.setItem("jaarplan2027:browserwarn","1"); } catch(x){} var w = document.getElementById("browserwarn"); if(w) w.remove(); }
+  if(a==="wipe" && confirm("Weet je zeker dat je alles wilt wissen? Alle ingevulde gegevens worden verwijderd, ook uit je opslagbestand. Dit kan niet ongedaan worden gemaakt.")){
     st = defaults(); eng = createEngine(FORMULAS, st); layDirty(); save(); go(route.join("/"));
   }
   if(a==="download") download();
-  if(a==="xlsx") exportXlsx();
   if(a==="copysum") copySum();
   if(a==="clearsel") clearSel();
   if(a==="export") exportData();
   if(a==="import") importData();
 });
 window.addEventListener("hashchange", function(){ if(location.hash.slice(1)!==route.join("/")) go(location.hash); });
+
+/* ---------- afdrukken per pagina ---------- */
+function togglePrintMenu(force){
+  var m = document.getElementById("printmenu"), b = document.querySelector('[data-act="printmenu"]');
+  var open = typeof force==="boolean" ? force : m.hidden;
+  m.hidden = !open; if(b) b.setAttribute("aria-expanded", open ? "true" : "false");
+  if(open && m.scrollIntoView) m.scrollIntoView({block:"nearest"});
+}
+document.addEventListener("click", function(e){
+  var m = document.getElementById("printmenu");
+  if(!m.hidden && !(e.target.closest && e.target.closest('#printmenu,[data-act="printmenu"]'))) togglePrintMenu(false);
+});
+function setPageSize(p){
+  var s = document.getElementById("pgsize");
+  if(s) s.textContent = "@page{size:A4 "+((p==="jaarplan"||p==="maandanalyse") ? "landscape" : "portrait")+";margin:10mm}";
+}
+function printPage(p){
+  togglePrintMenu(false);
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  go(p);
+  setPageSize(p);
+  setTimeout(function(){ window.print(); }, 150);
+}
 
 /* ---------- downloaden als HTML ---------- */
 function download(){
@@ -1805,7 +1845,7 @@ document.getElementById("gateform").addEventListener("submit", function(e){
   else document.getElementById("pwerr").textContent = "Dat wachtwoord klopt niet. Probeer het opnieuw.";
 });
 
-if(LOCAL) document.getElementById("dlbtn").textContent = "⬇ Kopie opslaan";
 saveMsg(false);
+fsInit();
 go(location.hash || "start/welkom");
 </script></body></html>
